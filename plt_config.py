@@ -14,10 +14,10 @@ params = {
     "axes.labelsize": 24,
     "xtick.labelsize": 20,
     "ytick.labelsize": 20,
-    'axes.titlesize': 24,
+    "axes.titlesize": 24,
     "legend.fontsize": 20,
     "lines.linewidth": 2,
-    'lines.markersize': 10,
+    "lines.markersize": 10,
     # "lines.markeredgewidth": 0.8,
     # "lines.markersize": 5,
     # "lines.marker": "o",
@@ -31,6 +31,6 @@ plt.style.use("seaborn-deep")
 #     [0.6350, 0.0780, 0.1840], [0, 0, 1], [0, 0.5, 0], [1, 0, 0], [0, 0.75, 0.75],\
 #     [0.75, 0, 0.75], [0.75, 0.75, 0], [0.25, 0.25, 0.25]]
 
-color = plt.rcParams['axes.prop_cycle'].by_key()['color']
+color = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
-print('Customized matplotlib configuration loaded.')
+print("Customized matplotlib configuration loaded.")

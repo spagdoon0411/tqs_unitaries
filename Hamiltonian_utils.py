@@ -19,7 +19,7 @@ def idx_1d_to_nd(i, system_size):
     n_dim = len(system_size)
     mod_num = torch.zeros(n_dim - 1, dtype=torch.int64)
     for d in range(n_dim - 1):
-        mod_num[-d - 1] = system_size[-1 - d:].prod()
+        mod_num[-d - 1] = system_size[-1 - d :].prod()
     idx = []
     for d in range(n_dim - 1):
         idx.append(i // mod_num[d])
@@ -33,7 +33,7 @@ def idx_nd_to_1d(idx, system_size):
     n_dim = len(system_size)
     mod_num = torch.zeros(n_dim - 1, dtype=torch.int64)
     for d in range(n_dim - 1):
-        mod_num[-d - 1] = system_size[-1 - d:].prod()
+        mod_num[-d - 1] = system_size[-1 - d :].prod()
     i = idx[:, -1]
     for d in range(n_dim - 1):
         i = i + idx[:, d] * mod_num[d]
@@ -44,9 +44,9 @@ def generate_spin_idx(system_size, interaction, periodic=False):
     system_size = torch.tensor(system_size, dtype=torch.int64).reshape(-1)
     n_dim = len(system_size)
     n = system_size.prod()
-    if interaction == 'external_field':
+    if interaction == "external_field":
         return torch.arange(n).reshape(n, 1)
-    elif interaction == 'nearest_neighbor':
+    elif interaction == "nearest_neighbor":
         if periodic:
             connection_0 = torch.arange(n)
             nd_idx = idx_1d_to_nd(connection_0, system_size)  # (n, n_dim)
@@ -73,7 +73,7 @@ def generate_spin_idx(system_size, interaction, periodic=False):
             connection_0 = torch.cat(connection_0, dim=-1)
             connection_1 = torch.cat(connection_1, dim=-1)
             return torch.stack([connection_0, connection_1], dim=1)
-    elif interaction == 'next_nearest_neighbor':
+    elif interaction == "next_nearest_neighbor":
         if n_dim == 1:
             if periodic:
                 connection_0 = torch.arange(n)
@@ -115,7 +115,9 @@ def generate_spin_idx(system_size, interaction, periodic=False):
                         new_idx[:, 0] = (new_idx[:, 0] - 1) % system_size[0]
                         new_idx[:, 1] = (new_idx[:, 1] + 1) % system_size[1]
                     else:
-                        raise Exception('Invalid dimension for diagonal interaction (expected 2 dims)')
+                        raise Exception(
+                            "Invalid dimension for diagonal interaction (expected 2 dims)"
+                        )
                     connection_1.append(idx_nd_to_1d(new_idx, system_size))
                 connection_1 = torch.cat(connection_1, dim=-1)
                 connection_0 = connection_0.expand(n_dim, -1).reshape(-1)
@@ -141,15 +143,21 @@ def generate_spin_idx(system_size, interaction, periodic=False):
                         connection_1.append(idx_nd_to_1d(new_idx_i, system_size))
                         connection_0.append(idx_nd_to_1d(nd_idx_i, system_size))
                     else:
-                        raise Exception('Invalid dimension for diagonal interaction (expected 2 dims)')
+                        raise Exception(
+                            "Invalid dimension for diagonal interaction (expected 2 dims)"
+                        )
                 connection_0 = torch.cat(connection_0, dim=-1)
                 connection_1 = torch.cat(connection_1, dim=-1)
                 return torch.stack([connection_0, connection_1], dim=1)
         else:
-            raise NotImplementedError('Next nearest neighbor interaction only implemented for 1 and 2 dims')
-    elif interaction == 'nn_horizontal' or interaction == 'nn_vertical':
-        assert n_dim == 2, 'Horizontal and vertical interactions only implemented for 2 dims'
-        i = 0 if interaction == 'nn_horizontal' else 1
+            raise NotImplementedError(
+                "Next nearest neighbor interaction only implemented for 1 and 2 dims"
+            )
+    elif interaction == "nn_horizontal" or interaction == "nn_vertical":
+        assert n_dim == 2, (
+            "Horizontal and vertical interactions only implemented for 2 dims"
+        )
+        i = 0 if interaction == "nn_horizontal" else 1
         if periodic:
             connection_0 = torch.arange(n)
             nd_idx = idx_1d_to_nd(connection_0, system_size)  # (n, n_dim)
@@ -175,4 +183,4 @@ def generate_spin_idx(system_size, interaction, periodic=False):
             connection_1 = torch.cat(connection_1, dim=-1)
             return torch.stack([connection_0, connection_1], dim=1)
     else:
-        raise NotImplementedError(f'Interaction {interaction} is not implemented')
+        raise NotImplementedError(f"Interaction {interaction} is not implemented")
