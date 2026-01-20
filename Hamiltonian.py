@@ -277,6 +277,66 @@ class Ising(Hamiltonian):
     #     return E, psi, M
 
 
+class IsingY(Hamiltonian):
+    def __init__(self, system_size, periodic=True):
+        super().__init__()
+        self.system_size = torch.tensor(system_size).reshape(-1)
+        self.n_dim = len(self.system_size)
+        self.n = self.system_size.prod()
+        self.param_dim = 1
+        self.param_range = torch.tensor([[0.5], [1.5]])
+        self.J = -1
+        self.h = 1
+        self.n_dim = len(self.system_size)
+        self.periodic = periodic
+        self.connections = generate_spin_idx(
+            self.system_size, "nearest_neighbor", periodic
+        )
+        self.external_field = generate_spin_idx(
+            self.system_size, "external_field", periodic
+        )
+        self.H = [
+            (["ZZ"], [self.J], self.connections),
+            (["Y"], [self.h], self.external_field),
+        ]
+
+        assert self.n_dim == 1, "2D symmetry is not implemented yet"
+        self.symmetry = Symmetry1D(self.n)
+        self.symmetry.add_symmetry("reflection")
+        self.symmetry.add_symmetry("spin_inversion")
+
+    def update_param(self, param):
+        self.H[1][1][0] = param
+
+    def full_H(self, param=1):
+        if isinstance(param, torch.Tensor):
+            param = param.detach().cpu().numpy().item()
+        h = param
+        self.Hamiltonian = sparse.csr_matrix((2**self.n, 2**self.n), dtype=np.float64)
+        for conn in self.connections:
+            JZZ = 1
+            for i in range(self.n):
+                if i == conn[0]:
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                elif i == conn[1]:
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                else:
+                    JZZ = sparse.kron(JZZ, I, format="csr")
+            self.Hamiltonian = self.Hamiltonian + self.J * JZZ
+        for i in range(self.n):
+            hY = 1
+            for j in range(self.n):
+                if i == j:
+                    hY = sparse.kron(hY, Y, format="csr")
+                else:
+                    hY = sparse.kron(hY, I, format="csr")
+            self.Hamiltonian = self.Hamiltonian + h * hY
+        return self.Hamiltonian
+
+    def DMRG(self, param=None, verbose=False, conserve=None):
+        raise NotImplementedError("DMRG not implemented for IsingY Hamiltonian")
+
+
 class XXZ(Hamiltonian):
     def __init__(self, system_size, periodic=True):
         super().__init__()
