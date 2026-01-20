@@ -6,12 +6,17 @@ Created on Sun May 15 23:30:45 2022
 """
 
 from model import TransformerModel
-from Hamiltonian import Ising, XYZ
+from Hamiltonian import Ising, IsingY, XYZ
 from optimizer import Optimizer
 
 import os
 import numpy as np
 import torch
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--model", choices=["Ising", "IsingY"], default="Ising")
+args = parser.parse_args()
 
 torch.set_default_tensor_type(
     torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
@@ -24,7 +29,8 @@ except FileExistsError:
 
 system_sizes = np.arange(10, 41, 2).reshape(-1, 1)
 
-Hamiltonians = [Ising(system_size_i, periodic=False) for system_size_i in system_sizes]
+hamiltonian_class = IsingY if args.model == 'IsingY' else Ising
+Hamiltonians = [hamiltonian_class(system_size_i, periodic=False) for system_size_i in system_sizes]
 
 param_dim = Hamiltonians[0].param_dim
 embedding_size = 32
