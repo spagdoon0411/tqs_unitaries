@@ -10,6 +10,7 @@ class DiagnosticLogger:
         self.config = config
         self.step_count = 0
         self.hooks = []
+        self.prev_weights = {}
     
     def register_hooks(self, model: torch.nn.Module):
         """Register forward hooks to capture activations"""
@@ -20,6 +21,19 @@ class DiagnosticLogger:
             if not self._should_exclude_layer(name):
                 hook = module.register_forward_hook(hook_fn)
                 self.hooks.append(hook)
+    
+    def store_weights(self, model: torch.nn.Module):
+        """Store current weights for update ratio calculation"""
+        for name, module in model.named_modules():
+            if hasattr(module, 'weight') and module.weight is not None:
+                self.prev_weights[name] = module.weight.detach().clone()
+    
+    def compute_weight_updates(self, model: torch.nn.Module):
+        """Compute weight updates and store them"""
+        for name, module in model.named_modules():
+            if hasattr(module, 'weight') and module.weight is not None and name in self.prev_weights:
+                update = module.weight.detach() - self.prev_weights[name]
+                module.weight._last_update = update
     
     def remove_hooks(self):
         """Remove all registered hooks"""

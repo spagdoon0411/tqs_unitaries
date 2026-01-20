@@ -137,6 +137,10 @@ class Optimizer:
 
             t1 = time.time()
 
+            # Store weights before optimization step for update ratio calculation
+            if self.diagnostic_logger is not None:
+                self.diagnostic_logger.store_weights(self.model)
+
             if use_SR:
                 autograd_hacks.clear_backprops(self.model)
                 optim.zero_grad()
@@ -162,6 +166,10 @@ class Optimizer:
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
+
+            # Compute weight updates after optimization step
+            if self.diagnostic_logger is not None:
+                self.diagnostic_logger.compute_weight_updates(self.model)
 
             scheduler.step()
             t2 = time.time()
