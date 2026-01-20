@@ -18,8 +18,9 @@ from SR import SR
 
 
 class Optimizer:
-    def __init__(self, model, Hamiltonians, point_of_interest=None):
+    def __init__(self, model, Hamiltonians, point_of_interest=None, logger=None):
         self.model = model
+        self.logger = logger
 
         self.Hamiltonians = Hamiltonians
         self.model.param_range = Hamiltonians[0].param_range
@@ -167,6 +168,13 @@ class Optimizer:
             print_str = f"E_real = {Er:.6f}\t E_imag = {Ei:.6f}\t E_var = {E_var:.6f}\t"
             E_curve[i - start_iter] = Er
             E_vars[i - start_iter] = E_var
+
+            # Neptune logging
+            if self.logger is not None:
+                self.logger["E_real"].log(float(Er))
+                self.logger["E_imag"].log(float(Ei))
+                self.logger["E_var"].log(float(E_var))
+                self.logger["loss"].log(float(loss.item()))
 
             end = time.time()
             print(

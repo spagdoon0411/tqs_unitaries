@@ -13,10 +13,26 @@ import os
 import numpy as np
 import torch
 import argparse
+import neptune
+import os
+from dotenv import load_dotenv
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", choices=["Ising", "IsingY"], default="Ising")
 args = parser.parse_args()
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Initialize Neptune logger
+logger = None
+if 'NEPTUNE_API_TOKEN' in os.environ and 'NEPTUNE_PROJECT' in os.environ:
+    logger = neptune.init_run(
+        api_token=os.environ['NEPTUNE_API_TOKEN'],
+        project=os.environ['NEPTUNE_PROJECT']
+    )
+else:
+    print("Warning: Neptune logging disabled. Set NEPTUNE_API_TOKEN and NEPTUNE_PROJECT in .env file to enable logging.")
 
 torch.set_default_tensor_type(
     torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
@@ -66,7 +82,7 @@ param_range = None  # use default param range
 point_of_interest = None
 use_SR = False
 
-optim = Optimizer(model, Hamiltonians, point_of_interest=point_of_interest)
+optim = Optimizer(model, Hamiltonians, point_of_interest=point_of_interest, logger=logger)
 optim.train(
     100000,
     batch=1000000,
