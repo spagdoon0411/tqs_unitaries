@@ -21,6 +21,7 @@ class Optimizer:
     def __init__(self, model, Hamiltonians, point_of_interest=None, logger=None):
         self.model = model
         self.logger = logger
+        self.diagnostic_logger = None
 
         self.Hamiltonians = Hamiltonians
         self.model.param_range = Hamiltonians[0].param_range
@@ -175,6 +176,10 @@ class Optimizer:
                 self.logger["E_imag"].log(float(Ei))
                 self.logger["E_var"].log(float(E_var))
                 self.logger["loss"].log(float(loss.item()))
+            
+            # Diagnostic logging
+            if self.diagnostic_logger is not None:
+                self.diagnostic_logger.log_diagnostics(self.model, step=i)
 
             end = time.time()
             print(

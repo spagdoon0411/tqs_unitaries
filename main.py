@@ -8,6 +8,8 @@ Created on Sun May 15 23:30:45 2022
 from model import TransformerModel
 from Hamiltonian import Ising, IsingY, XYZ
 from optimizer import Optimizer
+from diagnostic_config import DiagnosticConfig, DEFAULT_CONFIG
+from diagnostic_logger import DiagnosticLogger
 
 import os
 import numpy as np
@@ -21,6 +23,8 @@ import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", choices=["Ising", "IsingY"], default="Ising")
+parser.add_argument("--diagnostics", action="store_true", default=True, 
+                    help="Enable diagnostic logging (default: True)")
 args = parser.parse_args()
 
 # Load environment variables from .env file
@@ -129,6 +133,28 @@ point_of_interest = None
 use_SR = False
 
 optim = Optimizer(model, Hamiltonians, point_of_interest=point_of_interest, logger=logger)
+
+# Initialize diagnostic logger if enabled
+diagnostic_logger = None
+if args.diagnostics and logger:
+    diagnostic_logger = DiagnosticLogger(logger, DEFAULT_CONFIG)
+    diagnostic_logger.register_hooks(model)
+    optim.diagnostic_logger = diagnostic_logger
+    
+    # Log diagnostic config to Neptune
+    logger["run_config/diagnostics/enabled"] = True
+    logger["run_config/diagnostics/global_frequency"] = DEFAULT_CONFIG.global_frequency
+    logger["run_config/diagnostics/mean_activations"] = DEFAULT_CONFIG.mean_activations.enabled
+    logger["run_config/diagnostics/std_activations"] = DEFAULT_CONFIG.std_activations.enabled
+    logger["run_config/diagnostics/activations_below_threshold"] = DEFAULT_CONFIG.activations_below_threshold.enabled
+    logger["run_config/diagnostics/threshold_value"] = DEFAULT_CONFIG.activations_below_threshold.threshold
+    logger["run_config/diagnostics/gradient_l2_norm"] = DEFAULT_CONFIG.gradient_l2_norm.enabled
+    logger["run_config/diagnostics/weight_l2_norm"] = DEFAULT_CONFIG.weight_l2_norm.enabled
+    logger["run_config/diagnostics/update_to_weight_ratio"] = DEFAULT_CONFIG.update_to_weight_ratio.enabled
+    logger["run_config/diagnostics/activation_percentiles"] = DEFAULT_CONFIG.activation_percentiles.enabled
+elif logger:
+    logger["run_config/diagnostics/enabled"] = False
+
 optim.train(
     100000,
     batch=1000000,
