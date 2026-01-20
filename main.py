@@ -45,8 +45,33 @@ except FileExistsError:
 
 system_sizes = np.arange(10, 41, 2).reshape(-1, 1)
 
+# Log run configuration to Neptune
+if logger:
+    logger["run_config/gpu/available"] = torch.cuda.is_available()
+    if torch.cuda.is_available():
+        logger["run_config/gpu/device_count"] = torch.cuda.device_count()
+        logger["run_config/gpu/device_name"] = torch.cuda.get_device_name(0)
+        logger["run_config/gpu/memory_total"] = torch.cuda.get_device_properties(0).total_memory
+    
+    logger["run_config/hamiltonian/class"] = args.model
+    logger["run_config/system/sizes"] = str(system_sizes.flatten().tolist())
+    logger["run_config/system/min_size"] = int(system_sizes.min())
+    logger["run_config/system/max_size"] = int(system_sizes.max())
+    logger["run_config/system/num_sizes"] = len(system_sizes)
+
 hamiltonian_class = IsingY if args.model == 'IsingY' else Ising
 Hamiltonians = [hamiltonian_class(system_size_i, periodic=False) for system_size_i in system_sizes]
+
+# Log Hamiltonian parameters to Neptune
+if logger:
+    sample_ham = Hamiltonians[0]
+    logger["run_config/hamiltonian/param_dim"] = sample_ham.param_dim
+    logger["run_config/hamiltonian/param_range"] = str(sample_ham.param_range.tolist())
+    logger["run_config/hamiltonian/periodic"] = sample_ham.periodic
+    if hasattr(sample_ham, 'J'):
+        logger["run_config/hamiltonian/J"] = sample_ham.J
+    if hasattr(sample_ham, 'h'):
+        logger["run_config/hamiltonian/h"] = sample_ham.h
 
 param_dim = Hamiltonians[0].param_dim
 embedding_size = 32
@@ -68,6 +93,17 @@ model = TransformerModel(
 )
 num_params = sum([param.numel() for param in model.parameters()])
 print("Number of parameters: ", num_params)
+
+# Log model configuration to Neptune
+if logger:
+    logger["run_config/model/param_dim"] = param_dim
+    logger["run_config/model/embedding_size"] = embedding_size
+    logger["run_config/model/n_head"] = n_head
+    logger["run_config/model/n_hid"] = n_hid
+    logger["run_config/model/n_layers"] = n_layers
+    logger["run_config/model/dropout"] = dropout
+    logger["run_config/model/minibatch"] = minibatch
+    logger["run_config/model/num_params"] = num_params
 folder = "results/"
 name = type(Hamiltonians[0]).__name__
 save_str = f"{name}_{embedding_size}_{n_head}_{n_layers}"
