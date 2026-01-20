@@ -16,6 +16,8 @@ import argparse
 import neptune
 import os
 from dotenv import load_dotenv
+import signal
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", choices=["Ising", "IsingY"], default="Ising")
@@ -31,6 +33,14 @@ if 'NEPTUNE_API_TOKEN' in os.environ and 'NEPTUNE_PROJECT' in os.environ:
         api_token=os.environ['NEPTUNE_API_TOKEN'],
         project=os.environ['NEPTUNE_PROJECT']
     )
+    
+    def signal_handler(sig, frame):
+        print("\nInterrupted! Stopping Neptune logging...")
+        if logger:
+            logger.stop()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
 else:
     print("Warning: Neptune logging disabled. Set NEPTUNE_API_TOKEN and NEPTUNE_PROJECT in .env file to enable logging.")
 
