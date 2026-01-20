@@ -139,7 +139,7 @@ class DiagnosticLogger:
             stats[f"{layer_name}/fraction_below_threshold"] = float(below_thresh)
         
         if self.config.activation_percentiles.enabled:
-            percentiles = torch.quantile(act_flat, torch.tensor([0.01, 0.99]))
+            percentiles = torch.quantile(act_flat, torch.tensor([0.01, 0.99], device=act_flat.device))
             stats[f"{layer_name}/activation_1st_percentile"] = float(percentiles[0])
             stats[f"{layer_name}/activation_99th_percentile"] = float(percentiles[1])
         
