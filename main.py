@@ -23,8 +23,10 @@ import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", choices=["Ising", "IsingY"], default="Ising")
-parser.add_argument("--diagnostics", action="store_true", default=True, 
+parser.add_argument("--diagnostics", action="store_true", default=True,
                     help="Enable diagnostic logging (default: True)")
+parser.add_argument("--results-dir", default="results",
+                    help="Directory for saving results and checkpoints (default: results)")
 args = parser.parse_args()
 
 # Load environment variables from .env file
@@ -52,10 +54,7 @@ torch.set_default_tensor_type(
     torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 )
 # torch.set_default_tensor_type(torch.FloatTensor)
-try:
-    os.mkdir("results/")
-except FileExistsError:
-    pass
+os.makedirs(args.results_dir, exist_ok=True)
 
 system_sizes = np.arange(10, 41, 2).reshape(-1, 1)
 
@@ -118,10 +117,10 @@ if logger:
     logger["run_config/model/dropout"] = dropout
     logger["run_config/model/minibatch"] = minibatch
     logger["run_config/model/num_params"] = num_params
-folder = "results/"
+folder = args.results_dir
 name = type(Hamiltonians[0]).__name__
 save_str = f"{name}_{embedding_size}_{n_head}_{n_layers}"
-# missing_keys, unexpected_keys = model.load_state_dict(torch.load(f'{folder}ckpt_100000_{save_str}_0.ckpt'),
+# missing_keys, unexpected_keys = model.load_state_dict(torch.load(f'{folder}/ckpt_100000_{save_str}_0.ckpt'),
 #                                                       strict=False)
 # print(f'Missing keys: {missing_keys}')
 # print(f'Unexpected keys: {unexpected_keys}')
@@ -132,7 +131,7 @@ param_range = None  # use default param range
 point_of_interest = None
 use_SR = False
 
-optim = Optimizer(model, Hamiltonians, point_of_interest=point_of_interest, logger=logger)
+optim = Optimizer(model, Hamiltonians, point_of_interest=point_of_interest, logger=logger, results_dir=args.results_dir)
 
 # Initialize diagnostic logger if enabled
 diagnostic_logger = None

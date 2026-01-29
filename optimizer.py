@@ -18,10 +18,11 @@ from SR import SR
 
 
 class Optimizer:
-    def __init__(self, model, Hamiltonians, point_of_interest=None, logger=None):
+    def __init__(self, model, Hamiltonians, point_of_interest=None, logger=None, results_dir="results/"):
         self.model = model
         self.logger = logger
         self.diagnostic_logger = None
+        self.results_dir = results_dir
 
         self.Hamiltonians = Hamiltonians
         self.model.param_range = Hamiltonians[0].param_range
@@ -37,7 +38,7 @@ class Optimizer:
         self.preconditioner = SR(self.model)
 
         self.save_freq = 100
-        self.ckpt_freq = 10000
+        self.ckpt_freq = 100
         self.point_of_interest = point_of_interest
 
     @staticmethod
@@ -194,9 +195,9 @@ class Optimizer:
                 f"i = {i}\t {print_str} n = {n}\t lr = {scheduler.get_lr()[0]:.4e} t = {(end - start):.6f}  t_optim = {t2 - t1:.6f}"
             )
             if i % self.save_freq == 0:
-                with open(f"results/E_{save_str}.npy", "wb") as f:
+                with open(f"{self.results_dir}/E_{save_str}.npy", "wb") as f:
                     np.save(f, E_curve)
-                with open(f"results/E_var_{save_str}.npy", "wb") as f:
+                with open(f"{self.results_dir}/E_var_{save_str}.npy", "wb") as f:
                     np.save(f, E_vars)
                 if self.point_of_interest is not None:
                     E_watch[idx] = (
@@ -214,12 +215,12 @@ class Optimizer:
                         .numpy()
                     )
                     idx += 1
-                    with open(f"results/E_watch_{save_str}.npy", "wb") as f:
+                    with open(f"{self.results_dir}/E_watch_{save_str}.npy", "wb") as f:
                         np.save(f, E_watch)
-                    with open(f"results/m_watch_{save_str}.npy", "wb") as f:
+                    with open(f"{self.results_dir}/m_watch_{save_str}.npy", "wb") as f:
                         np.save(f, m_watch)
-                torch.save(self.model.state_dict(), f"results/model_{save_str}.ckpt")
+                torch.save(self.model.state_dict(), f"{self.results_dir}/model_{save_str}.ckpt")
                 if i % self.ckpt_freq == 0:
                     torch.save(
-                        self.model.state_dict(), f"results/ckpt_{i}_{save_str}.ckpt"
+                        self.model.state_dict(), f"{self.results_dir}/ckpt_{i}_{save_str}.ckpt"
                     )
