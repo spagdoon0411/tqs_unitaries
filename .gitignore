@@ -1,3 +1,5 @@
+*.pt
+out/stale/
 results/
 
 # Byte-compiled / optimized / DLL files
