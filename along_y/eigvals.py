@@ -189,3 +189,5 @@ print("=" * 60)
 print(f"Ising (ZZ + X) ground state energy:  {E_ground_ising:.10f}")
 print(f"IsingY (ZZ + Y) ground state energy: {E_ground_ising_y:.10f}")
 print(f"Difference: {abs(E_ground_ising - E_ground_ising_y):.10e}")
+
+plt.savefig("groundstate_comparison.png", dpi=150, bbox_inches='tight')
