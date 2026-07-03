@@ -12,63 +12,88 @@ from optimizer import Optimizer
 import os
 import numpy as np
 import torch
+import wandb
 
-torch.set_default_tensor_type(
-    torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-)
-# torch.set_default_tensor_type(torch.FloatTensor)
-try:
-    os.mkdir("results/")
-except FileExistsError:
-    pass
+wandb_project = "tqs-unitaries"
 
-system_sizes = np.arange(10, 41, 2).reshape(-1, 1)
 
-Hamiltonians = [
-    IsingThreeSpin(system_size_i, periodic=True) for system_size_i in system_sizes
-]
+def main():
+    config = {
+        "hamiltonian": "IsingThreeSpin",
+        "system_sizes": np.arange(10, 41, 2).reshape(-1, 1).tolist(),
+        "periodic": True,
+        "embedding_size": 32,
+        "n_head": 8,
+        "n_hid": 32,
+        "n_layers": 8,
+        "dropout": 0,
+        "minibatch": 10000,
+        "n_iter": 100000,
+        "batch": 1000000,
+        "max_unique": 100,
+        "use_SR": False,
+        "fine_tuning": False,
+        "param_range": None,
+        "point_of_interest": None,
+    }
 
-param_dim = Hamiltonians[0].param_dim
-embedding_size = 32
-n_head = 8
-n_hid = embedding_size
-n_layers = 8
-dropout = 0
-minibatch = 10000
+    torch.set_default_tensor_type(
+        torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+    )
+    try:
+        os.mkdir("results/")
+    except FileExistsError:
+        pass
 
-model = TransformerModel(
-    system_sizes,
-    param_dim,
-    embedding_size,
-    n_head,
-    n_hid,
-    n_layers,
-    dropout=dropout,
-    minibatch=minibatch,
-)
-num_params = sum([param.numel() for param in model.parameters()])
-print("Number of parameters: ", num_params)
-folder = "results/"
-name = type(Hamiltonians[0]).__name__
-save_str = f"{name}_{embedding_size}_{n_head}_{n_layers}"
-# missing_keys, unexpected_keys = model.load_state_dict(torch.load(f'{folder}ckpt_100000_{save_str}_0.ckpt'),
-#                                                       strict=False)
-# print(f'Missing keys: {missing_keys}')
-# print(f'Unexpected keys: {unexpected_keys}')
+    system_sizes = np.array(config["system_sizes"])
+    Hamiltonians = [
+        IsingThreeSpin(system_size_i, periodic=config["periodic"])
+        for system_size_i in system_sizes
+    ]
+    config["param_dim"] = Hamiltonians[0].param_dim
+    config["J2"] = Hamiltonians[0].J2
+    config["J3"] = Hamiltonians[0].J3
+    config["param_range"] = (
+        Hamiltonians[0].param_range.tolist()
+        if config["param_range"] is None
+        else config["param_range"]
+    )
 
-param_range = None  # use default param range
-# param = torch.tensor([1.0])
-# param_range = torch.tensor([[param], [param]])
-point_of_interest = None
-use_SR = False
+    model = TransformerModel(
+        system_sizes,
+        config["param_dim"],
+        config["embedding_size"],
+        config["n_head"],
+        config["n_hid"],
+        config["n_layers"],
+        dropout=config["dropout"],
+        minibatch=config["minibatch"],
+    )
+    config["num_params"] = sum(param.numel() for param in model.parameters())
+    print("Number of parameters: ", config["num_params"])
 
-optim = Optimizer(model, Hamiltonians, point_of_interest=point_of_interest)
-optim.train(
-    100000,
-    batch=1000000,
-    max_unique=100,
-    param_range=param_range,
-    fine_tuning=False,
-    use_SR=use_SR,
-    ensemble_id=int(use_SR),
-)
+    name = type(Hamiltonians[0]).__name__
+    save_str = f"{name}_{config['embedding_size']}_{config['n_head']}_{config['n_layers']}"
+    # missing_keys, unexpected_keys = model.load_state_dict(
+    #     torch.load(f"results/ckpt_100000_{save_str}_0.ckpt"), strict=False
+    # )
+    # print(f'Missing keys: {missing_keys}')
+    # print(f'Unexpected keys: {unexpected_keys}')
+
+    wandb.init(project=wandb_project, config=config)
+
+    optim = Optimizer(model, Hamiltonians, point_of_interest=config["point_of_interest"])
+    optim.train(
+        config["n_iter"],
+        batch=config["batch"],
+        max_unique=config["max_unique"],
+        param_range=torch.tensor(config["param_range"]),
+        fine_tuning=config["fine_tuning"],
+        use_SR=config["use_SR"],
+        ensemble_id=int(config["use_SR"]),
+    )
+    wandb.finish()
+
+
+if __name__ == "__main__":
+    main()

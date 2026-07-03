@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import wandb
 
 from model_utils import sample, compute_grad
 from evaluation import compute_E_sample, compute_magnetization
@@ -169,8 +170,23 @@ class Optimizer:
             E_vars[i - start_iter] = E_var
 
             end = time.time()
+            lr = scheduler.get_lr()[0]
+            t_iter = end - start
+            t_optim = t2 - t1
             print(
-                f"i = {i}\t {print_str} n = {n}\t lr = {scheduler.get_lr()[0]:.4e} t = {(end - start):.6f}  t_optim = {t2 - t1:.6f}"
+                f"i = {i}\t {print_str} n = {n}\t lr = {lr:.4e} t = {t_iter:.6f}  t_optim = {t_optim:.6f}"
+            )
+            wandb.log(
+                {
+                    "E_real": Er,
+                    "E_imag": Ei,
+                    "E_var": E_var,
+                    "n": n,
+                    "lr": lr,
+                    "t_iter": t_iter,
+                    "t_optim": t_optim,
+                },
+                step=i,
             )
             if i % self.save_freq == 0:
                 with open(f"results/E_{save_str}.npy", "wb") as f:
