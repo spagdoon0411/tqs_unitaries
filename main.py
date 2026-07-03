@@ -6,7 +6,7 @@ Created on Sun May 15 23:30:45 2022
 """
 
 from model import TransformerModel
-from Hamiltonian import Ising, XYZ
+from Hamiltonian import IsingThreeSpin
 from optimizer import Optimizer
 
 import os
@@ -24,7 +24,9 @@ except FileExistsError:
 
 system_sizes = np.arange(10, 41, 2).reshape(-1, 1)
 
-Hamiltonians = [Ising(system_size_i, periodic=False) for system_size_i in system_sizes]
+Hamiltonians = [
+    IsingThreeSpin(system_size_i, periodic=True) for system_size_i in system_sizes
+]
 
 param_dim = Hamiltonians[0].param_dim
 embedding_size = 32
