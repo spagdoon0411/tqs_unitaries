@@ -277,6 +277,77 @@ class Ising(Hamiltonian):
     #     return E, psi, M
 
 
+class IsingThreeSpin(Hamiltonian):
+    def __init__(self, system_size, periodic=True):
+        super().__init__()
+        self.system_size = torch.tensor(system_size).reshape(-1)
+        self.n_dim = len(self.system_size)
+        assert self.n_dim == 1, "IsingThreeSpin currently only supports 1D chains"
+        self.n = self.system_size.prod()
+        self.param_dim = 1
+        self.param_range = torch.tensor([[-0.5], [2.5]])  # h
+        self.J2 = -0.5  # ZZ coupling
+        self.J3 = -0.5  # ZXZ (cluster) coupling
+        self.h = 0.5
+        self.periodic = periodic
+        self.connections = generate_spin_idx(
+            self.system_size, "nearest_neighbor", periodic
+        )
+        self.triples = generate_spin_idx(
+            self.system_size, "nearest_neighbor_triple", periodic
+        )
+        self.external_field = generate_spin_idx(
+            self.system_size, "external_field", periodic
+        )
+        self.H = [
+            (["ZZ"], [self.J2], self.connections),
+            (["ZXZ"], [self.J3], self.triples),
+            (["X"], [self.h], self.external_field),
+        ]
+
+        assert self.n_dim == 1, "2D symmetry is not implemented yet"
+        self.symmetry = Symmetry1D(self.n)
+        self.symmetry.add_symmetry("reflection")
+        self.symmetry.add_symmetry("spin_inversion")
+
+    def update_param(self, param):
+        # param: (1, ), h
+        self.H[2][1][0] = param / 2
+
+    def full_H(self, param=1):
+        if isinstance(param, torch.Tensor):
+            param = param.detach().cpu().numpy().item()
+        h = param / 2
+        self.Hamiltonian = sparse.csr_matrix((2**self.n, 2**self.n), dtype=np.float64)
+        for conn in self.connections:
+            JZZ = 1
+            for i in range(self.n):
+                if i == conn[0] or i == conn[1]:
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                else:
+                    JZZ = sparse.kron(JZZ, I, format="csr")
+            self.Hamiltonian = self.Hamiltonian + self.J2 * JZZ
+        for prev, center, nxt in self.triples.tolist():
+            JZXZ = 1
+            for i in range(self.n):
+                if i == center:
+                    JZXZ = sparse.kron(JZXZ, X, format="csr")
+                elif i == prev or i == nxt:
+                    JZXZ = sparse.kron(JZXZ, Z, format="csr")
+                else:
+                    JZXZ = sparse.kron(JZXZ, I, format="csr")
+            self.Hamiltonian = self.Hamiltonian + self.J3 * JZXZ
+        for i in range(self.n):
+            hX = 1
+            for j in range(self.n):
+                if i == j:
+                    hX = sparse.kron(hX, X, format="csr")
+                else:
+                    hX = sparse.kron(hX, I, format="csr")
+            self.Hamiltonian = self.Hamiltonian + h * hX
+        return self.Hamiltonian
+
+
 class XXZ(Hamiltonian):
     def __init__(self, system_size, periodic=True):
         super().__init__()

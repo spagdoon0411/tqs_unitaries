@@ -153,6 +153,17 @@ def generate_spin_idx(system_size, interaction, periodic=False):
             raise NotImplementedError(
                 "Next nearest neighbor interaction only implemented for 1 and 2 dims"
             )
+    elif interaction == "nearest_neighbor_triple":
+        assert n_dim == 1, "Three-site interaction only implemented for 1 dim"
+        center = torch.arange(n)
+        if periodic:
+            prev = (center - 1) % n
+            nxt = (center + 1) % n
+        else:
+            center = center[1:-1]
+            prev = center - 1
+            nxt = center + 1
+        return torch.stack([prev, center, nxt], dim=1)  # (n_triple, 3)
     elif interaction == "nn_horizontal" or interaction == "nn_vertical":
         assert n_dim == 2, (
             "Horizontal and vertical interactions only implemented for 2 dims"
