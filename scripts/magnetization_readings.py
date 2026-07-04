@@ -1,10 +1,14 @@
 """
-Draws quantum-state readings of |magnetization| across a sweep of h from one checkpoint
+Draws quantum-state readings of magnetization across a sweep of h from one checkpoint
 or a range of checkpoints, saving the raw (non-averaged) per-reading tensor to disk.
 sigma^z is diagonal in the sampled basis, so each reading is read directly off the
-sampled spin bits:
+sampled spin bits, as the zz structure factor:
 
-    m(x) = | mean_i (2 x_i - 1) |
+    m(x) = sqrt( mean_i (2 x_i - 1)^2 )
+
+matching scripts/dmrg/magnetization_sweep_dmrg.py's m(h) = sqrt((1/L^2) sum_ij <Z_i Z_j>)
+exactly (E_samples[m(x)^2] = (1/L^2) sum_ij <Z_i Z_j>, since Z is diagonal in this basis),
+so the two are directly comparable in plot_magnetization_readings.py.
 
 Run from the repo root:
 
@@ -42,8 +46,9 @@ MAX_UNIQUE = 2048
 def _reading(model: TransformerModel, symmetry) -> float:
     samples, sample_weight = sample(model, batch=BATCH, max_unique=MAX_UNIQUE, symmetry=symmetry)
     spins_pm = 2 * samples.to(torch.get_default_dtype()) - 1
-    per_config = spins_pm.mean(dim=0).abs()
-    return (per_config * sample_weight).sum().item()
+    per_config_sq = spins_pm.mean(dim=0) ** 2
+    mean_sq = (per_config_sq * sample_weight).sum()
+    return mean_sq.sqrt().item()
 
 
 def main() -> None:
@@ -69,6 +74,12 @@ def main() -> None:
         help="Only keep iterations that are multiples of this value (default: 1, i.e. no skipping).",
     )
     parser.add_argument("--n-h", type=int, required=True, help="Number of h values to sweep (granularity).")
+    parser.add_argument(
+        "--h-min", type=float, default=None, help="Override the sweep's lower h bound (default: trained param_range)."
+    )
+    parser.add_argument(
+        "--h-max", type=float, default=None, help="Override the sweep's upper h bound (default: trained param_range)."
+    )
     parser.add_argument(
         "--n-readings", type=int, default=10, help="Independent quantum-state readings per h (default: 10)."
     )
@@ -153,6 +164,10 @@ def main() -> None:
     system_size = system_sizes[args.system_size_idx]
     H = ham_cls(system_size, periodic=config["periodic"])
     h_min, h_max = config["param_range"][0][0], config["param_range"][1][0]
+    if args.h_min is not None:
+        h_min = args.h_min
+    if args.h_max is not None:
+        h_max = args.h_max
 
     # Each concurrent reading gets its own model instance, since set_param mutates
     # model state (system_size, param, prefix) and sharing one across threads would race.
