@@ -10,6 +10,7 @@ from Hamiltonian import IsingThreeSpin
 from optimizer import Optimizer
 
 import os
+import datetime
 import numpy as np
 import torch
 import wandb
@@ -35,6 +36,7 @@ def main():
         "fine_tuning": False,
         "param_range": None,
         "point_of_interest": None,
+        "checkpoint_freq": 10,
     }
 
     torch.set_default_tensor_type(
@@ -82,17 +84,30 @@ def main():
 
     wandb.init(project=wandb_project, config=config)
 
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    checkpoint_dir = os.path.join("checkpoints", f"{timestamp}_{wandb.run.name}")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
     optim = Optimizer(model, Hamiltonians, point_of_interest=config["point_of_interest"])
-    optim.train(
-        config["n_iter"],
-        batch=config["batch"],
-        max_unique=config["max_unique"],
-        param_range=torch.tensor(config["param_range"]),
-        fine_tuning=config["fine_tuning"],
-        use_SR=config["use_SR"],
-        ensemble_id=int(config["use_SR"]),
-    )
-    wandb.finish()
+    try:
+        optim.train(
+            config["n_iter"],
+            batch=config["batch"],
+            max_unique=config["max_unique"],
+            param_range=torch.tensor(config["param_range"]),
+            fine_tuning=config["fine_tuning"],
+            use_SR=config["use_SR"],
+            ensemble_id=int(config["use_SR"]),
+            checkpoint_dir=checkpoint_dir,
+            checkpoint_freq=config["checkpoint_freq"],
+            run_config=config,
+            wandb_run_id=wandb.run.id,
+            wandb_run_name=wandb.run.name,
+        )
+    except KeyboardInterrupt:
+        print("Training interrupted; finishing wandb run before exiting.")
+    finally:
+        wandb.finish()
 
 
 if __name__ == "__main__":

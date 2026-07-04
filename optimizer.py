@@ -5,7 +5,10 @@ Created on Sun May 15 22:53:44 2022
 @author: Yuanhang Zhang
 """
 
+import os
 import time
+import json
+import datetime
 import numpy as np
 import torch
 import torch.nn as nn
@@ -77,6 +80,11 @@ class Optimizer:
         use_SR=True,
         ensemble_id=0,
         start_iter=None,
+        checkpoint_dir=None,
+        checkpoint_freq=10,
+        run_config=None,
+        wandb_run_id=None,
+        wandb_run_name=None,
     ):
         name, embedding_size, n_head, n_layers = (
             type(self.Hamiltonians[0]).__name__,
@@ -123,98 +131,141 @@ class Optimizer:
         E_curve = np.zeros(n_iter)
         E_vars = np.zeros(n_iter)
 
-        for i in range(start_iter, start_iter + n_iter):
-            start = time.time()
-            self.model.set_param()
-            size_idx = self.model.size_idx
-            n = self.model.system_size.prod()
-            H = self.Hamiltonians[size_idx]
+        checkpoint_iters = {}
+        run_summary = {
+            "wandb_project": wandb.run.project if wandb.run is not None else None,
+            "wandb_run_id": wandb_run_id,
+            "wandb_run_name": wandb_run_name,
+            "created_at": datetime.datetime.now().isoformat(),
+            "config": run_config,
+            "train_args": {
+                "n_iter": n_iter - 1,
+                "batch": batch,
+                "max_unique": max_unique,
+                "param_range": param_range.detach().cpu().numpy().tolist(),
+                "fine_tuning": fine_tuning,
+                "use_SR": use_SR,
+                "ensemble_id": ensemble_id,
+                "start_iter": start_iter,
+                "checkpoint_freq": checkpoint_freq,
+            },
+            "last_iter": None,
+            "checkpoints": checkpoint_iters,
+        }
 
-            loss, log_amp, log_phase, sample_weight, Er, Ei, E_var = (
-                self.minimize_energy_step(H, batch, max_unique, use_symmetry=True)
-            )
+        def save_checkpoint(iter_num):
+            if checkpoint_dir is None:
+                return
+            ckpt_path = os.path.join(checkpoint_dir, f"model_iter_{iter_num}.pt")
+            torch.save(self.model.state_dict(), ckpt_path)
+            checkpoint_iters[iter_num] = ckpt_path
+            run_summary["last_iter"] = iter_num
+            with open(os.path.join(checkpoint_dir, "run_summary.json"), "w") as f:
+                json.dump(run_summary, f, indent=2)
+            wandb.log({"checkpoint_iter": iter_num}, step=iter_num)
 
-            t1 = time.time()
+        last_i = start_iter - 1
+        try:
+            for i in range(start_iter, start_iter + n_iter):
+                start = time.time()
+                self.model.set_param()
+                size_idx = self.model.size_idx
+                n = self.model.system_size.prod()
+                H = self.Hamiltonians[size_idx]
 
-            if use_SR:
-                autograd_hacks.clear_backprops(self.model)
-                optim.zero_grad()
-                log_amp.sum().backward(retain_graph=True)
-                autograd_hacks.compute_grad1(
-                    self.model, loss_type="sum", grad_name="grad1"
+                loss, log_amp, log_phase, sample_weight, Er, Ei, E_var = (
+                    self.minimize_energy_step(H, batch, max_unique, use_symmetry=True)
                 )
-                autograd_hacks.clear_backprops(self.model)
 
-                optim.zero_grad()
-                log_phase.sum().backward(retain_graph=True)
-                autograd_hacks.compute_grad1(
-                    self.model, loss_type="sum", grad_name="grad2"
-                )
-                autograd_hacks.clear_backprops(self.model)
+                t1 = time.time()
 
-                optim.zero_grad()
-                loss.backward()
-                autograd_hacks.clear_backprops(self.model)
-                self.preconditioner.step(sample_weight)
-                optim.step()
-            else:
-                optim.zero_grad()
-                loss.backward()
-                optim.step()
-
-            scheduler.step()
-            t2 = time.time()
-
-            print_str = f"E_real = {Er:.6f}\t E_imag = {Ei:.6f}\t E_var = {E_var:.6f}\t"
-            E_curve[i - start_iter] = Er
-            E_vars[i - start_iter] = E_var
-
-            end = time.time()
-            lr = scheduler.get_lr()[0]
-            t_iter = end - start
-            t_optim = t2 - t1
-            print(
-                f"i = {i}\t {print_str} n = {n}\t lr = {lr:.4e} t = {t_iter:.6f}  t_optim = {t_optim:.6f}"
-            )
-            wandb.log(
-                {
-                    "E_real": Er,
-                    "E_imag": Ei,
-                    "E_var": E_var,
-                    "n": n,
-                    "lr": lr,
-                    "t_iter": t_iter,
-                    "t_optim": t_optim,
-                },
-                step=i,
-            )
-            if i % self.save_freq == 0:
-                with open(f"results/E_{save_str}.npy", "wb") as f:
-                    np.save(f, E_curve)
-                with open(f"results/E_var_{save_str}.npy", "wb") as f:
-                    np.save(f, E_vars)
-                if self.point_of_interest is not None:
-                    E_watch[idx] = (
-                        compute_E_sample(self.model, size_i, param_i, H_watch)
-                        .real.detach()
-                        .cpu()
-                        .numpy()
+                if use_SR:
+                    autograd_hacks.clear_backprops(self.model)
+                    optim.zero_grad()
+                    log_amp.sum().backward(retain_graph=True)
+                    autograd_hacks.compute_grad1(
+                        self.model, loss_type="sum", grad_name="grad1"
                     )
-                    m_watch[idx, :] = (
-                        compute_magnetization(
-                            self.model, size_i, param_i, symmetry=H_watch.symmetry
+                    autograd_hacks.clear_backprops(self.model)
+
+                    optim.zero_grad()
+                    log_phase.sum().backward(retain_graph=True)
+                    autograd_hacks.compute_grad1(
+                        self.model, loss_type="sum", grad_name="grad2"
+                    )
+                    autograd_hacks.clear_backprops(self.model)
+
+                    optim.zero_grad()
+                    loss.backward()
+                    autograd_hacks.clear_backprops(self.model)
+                    self.preconditioner.step(sample_weight)
+                    optim.step()
+                else:
+                    optim.zero_grad()
+                    loss.backward()
+                    optim.step()
+
+                scheduler.step()
+                t2 = time.time()
+
+                print_str = f"E_real = {Er:.6f}\t E_imag = {Ei:.6f}\t E_var = {E_var:.6f}\t"
+                E_curve[i - start_iter] = Er
+                E_vars[i - start_iter] = E_var
+
+                end = time.time()
+                lr = scheduler.get_lr()[0]
+                t_iter = end - start
+                t_optim = t2 - t1
+                print(
+                    f"i = {i}\t {print_str} n = {n}\t lr = {lr:.4e} t = {t_iter:.6f}  t_optim = {t_optim:.6f}"
+                )
+                wandb.log(
+                    {
+                        "E_real": Er,
+                        "E_imag": Ei,
+                        "E_var": E_var,
+                        "n": n,
+                        "lr": lr,
+                        "t_iter": t_iter,
+                        "t_optim": t_optim,
+                    },
+                    step=i,
+                )
+                if i % self.save_freq == 0:
+                    with open(f"results/E_{save_str}.npy", "wb") as f:
+                        np.save(f, E_curve)
+                    with open(f"results/E_var_{save_str}.npy", "wb") as f:
+                        np.save(f, E_vars)
+                    if self.point_of_interest is not None:
+                        E_watch[idx] = (
+                            compute_E_sample(self.model, size_i, param_i, H_watch)
+                            .real.detach()
+                            .cpu()
+                            .numpy()
                         )
-                        .real.detach()
-                        .cpu()
-                        .numpy()
-                    )
-                    idx += 1
-                    with open(f"results/E_watch_{save_str}.npy", "wb") as f:
-                        np.save(f, E_watch)
-                    with open(f"results/m_watch_{save_str}.npy", "wb") as f:
-                        np.save(f, m_watch)
-                torch.save(self.model.state_dict(), f"results/model_{save_str}.ckpt")
-                if i % self.ckpt_freq == 0:
-                    torch.save(
-                        self.model.state_dict(), f"results/ckpt_{i}_{save_str}.ckpt"
-                    )
+                        m_watch[idx, :] = (
+                            compute_magnetization(
+                                self.model, size_i, param_i, symmetry=H_watch.symmetry
+                            )
+                            .real.detach()
+                            .cpu()
+                            .numpy()
+                        )
+                        idx += 1
+                        with open(f"results/E_watch_{save_str}.npy", "wb") as f:
+                            np.save(f, E_watch)
+                        with open(f"results/m_watch_{save_str}.npy", "wb") as f:
+                            np.save(f, m_watch)
+                    torch.save(self.model.state_dict(), f"results/model_{save_str}.ckpt")
+                    if i % self.ckpt_freq == 0:
+                        torch.save(
+                            self.model.state_dict(), f"results/ckpt_{i}_{save_str}.ckpt"
+                        )
+                last_i = i
+                if checkpoint_dir is not None and i % checkpoint_freq == 0:
+                    save_checkpoint(i)
+        except KeyboardInterrupt:
+            save_checkpoint(last_i)
+            raise
+        else:
+            save_checkpoint(last_i)
