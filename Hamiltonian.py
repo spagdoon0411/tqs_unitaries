@@ -286,8 +286,8 @@ class IsingThreeSpin(Hamiltonian):
         self.n = self.system_size.prod()
         self.param_dim = 1
         self.param_range = torch.tensor([[-0.5], [2.5]])  # h
-        self.J2 = -0.5  # ZZ coupling
-        self.J3 = -0.5  # ZXZ (cluster) coupling
+        self.J2 = 0.5  # ZZ coupling
+        self.J3 = 0.5  # ZXZ (cluster) coupling
         self.h = 0.5
         self.periodic = periodic
         self.connections = generate_spin_idx(
@@ -300,9 +300,9 @@ class IsingThreeSpin(Hamiltonian):
             self.system_size, "external_field", periodic
         )
         self.H = [
-            (["ZZ"], [self.J2], self.connections),
-            (["ZXZ"], [self.J3], self.triples),
-            (["X"], [self.h], self.external_field),
+            (["ZZ"], [-self.J2], self.connections),
+            (["ZXZ"], [-self.J3], self.triples),
+            (["X"], [-self.h], self.external_field),
         ]
 
         assert self.n_dim == 1, "2D symmetry is not implemented yet"
