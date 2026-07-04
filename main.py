@@ -22,7 +22,7 @@ def main():
     config = {
         "hamiltonian": "IsingThreeSpin",
         "system_sizes": np.arange(10, 41, 2).reshape(-1, 1).tolist(),
-        "periodic": True,
+        "periodic": False,
         "embedding_size": 32,
         "n_head": 8,
         "n_hid": 32,
@@ -75,7 +75,9 @@ def main():
     print("Number of parameters: ", config["num_params"])
 
     name = type(Hamiltonians[0]).__name__
-    save_str = f"{name}_{config['embedding_size']}_{config['n_head']}_{config['n_layers']}"
+    save_str = (
+        f"{name}_{config['embedding_size']}_{config['n_head']}_{config['n_layers']}"
+    )
     # missing_keys, unexpected_keys = model.load_state_dict(
     #     torch.load(f"results/ckpt_100000_{save_str}_0.ckpt"), strict=False
     # )
@@ -88,7 +90,9 @@ def main():
     checkpoint_dir = os.path.join("checkpoints", f"{timestamp}_{wandb.run.name}")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    optim = Optimizer(model, Hamiltonians, point_of_interest=config["point_of_interest"])
+    optim = Optimizer(
+        model, Hamiltonians, point_of_interest=config["point_of_interest"]
+    )
     try:
         optim.train(
             config["n_iter"],
