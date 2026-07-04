@@ -132,6 +132,11 @@ class Optimizer:
         E_vars = np.zeros(n_iter)
 
         checkpoint_iters = {}
+        if checkpoint_dir is not None:
+            existing_summary_path = os.path.join(checkpoint_dir, "run_summary.json")
+            if os.path.exists(existing_summary_path):
+                with open(existing_summary_path) as f:
+                    checkpoint_iters.update(json.load(f).get("checkpoints", {}))
         run_summary = {
             "wandb_project": wandb.run.project if wandb.run is not None else None,
             "wandb_run_id": wandb_run_id,

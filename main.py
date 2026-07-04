@@ -9,8 +9,12 @@ from model import TransformerModel
 from Hamiltonian import IsingThreeSpin
 from optimizer import Optimizer
 
+import argparse
+import json
 import os
 import datetime
+from pathlib import Path
+
 import numpy as np
 import torch
 import wandb
@@ -18,26 +22,67 @@ import wandb
 wandb_project = "tqs-unitaries"
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--resume",
+        type=Path,
+        default=None,
+        help="Path to an existing run's checkpoint folder (containing run_summary.json). "
+        "Resumes training from that run's last checkpoint, using its recorded config.",
+    )
+    return parser.parse_args()
+
+
+def load_resume_state(resume_dir):
+    summary_path = resume_dir / "run_summary.json"
+    if not summary_path.exists():
+        raise SystemExit(f"No run_summary.json found in '{resume_dir}'.")
+    with open(summary_path) as f:
+        run_summary = json.load(f)
+    if not run_summary.get("checkpoints"):
+        raise SystemExit(f"'{summary_path}' has no checkpoint index; nothing to resume from.")
+
+    config = run_summary["config"]
+    last_iter = run_summary["last_iter"]
+    ckpt_path = Path(run_summary["checkpoints"][str(last_iter)])
+    if not ckpt_path.exists():
+        ckpt_path = resume_dir / ckpt_path.name
+    if not ckpt_path.exists():
+        raise SystemExit(f"Checkpoint for iteration {last_iter} not found (looked for '{ckpt_path}').")
+
+    return config, last_iter, ckpt_path, run_summary["wandb_run_id"], run_summary["wandb_run_name"]
+
+
 def main():
-    config = {
-        "hamiltonian": "IsingThreeSpin",
-        "system_sizes": np.arange(10, 41, 2).reshape(-1, 1).tolist(),
-        "periodic": False,
-        "embedding_size": 32,
-        "n_head": 8,
-        "n_hid": 32,
-        "n_layers": 8,
-        "dropout": 0,
-        "minibatch": 10000,
-        "n_iter": 100000,
-        "batch": 1000000,
-        "max_unique": 100,
-        "use_SR": False,
-        "fine_tuning": False,
-        "param_range": None,
-        "point_of_interest": None,
-        "checkpoint_freq": 10,
-    }
+    args = parse_args()
+    resuming = args.resume is not None
+
+    if resuming:
+        config, last_iter, ckpt_path, wandb_run_id, wandb_run_name = load_resume_state(args.resume)
+        checkpoint_dir = str(args.resume)
+        start_iter = last_iter + 1
+    else:
+        config = {
+            "hamiltonian": "IsingThreeSpin",
+            "system_sizes": np.arange(10, 41, 2).reshape(-1, 1).tolist(),
+            "periodic": False,
+            "embedding_size": 32,
+            "n_head": 8,
+            "n_hid": 32,
+            "n_layers": 8,
+            "dropout": 0,
+            "minibatch": 10000,
+            "n_iter": 100000,
+            "batch": 1000000,
+            "max_unique": 100,
+            "use_SR": False,
+            "fine_tuning": False,
+            "param_range": None,
+            "point_of_interest": None,
+            "checkpoint_freq": 10,
+        }
+        start_iter = None
 
     torch.set_default_tensor_type(
         torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
@@ -74,21 +119,17 @@ def main():
     config["num_params"] = sum(param.numel() for param in model.parameters())
     print("Number of parameters: ", config["num_params"])
 
-    name = type(Hamiltonians[0]).__name__
-    save_str = (
-        f"{name}_{config['embedding_size']}_{config['n_head']}_{config['n_layers']}"
-    )
-    # missing_keys, unexpected_keys = model.load_state_dict(
-    #     torch.load(f"results/ckpt_100000_{save_str}_0.ckpt"), strict=False
-    # )
-    # print(f'Missing keys: {missing_keys}')
-    # print(f'Unexpected keys: {unexpected_keys}')
-
-    wandb.init(project=wandb_project, config=config)
-
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    checkpoint_dir = os.path.join("checkpoints", f"{timestamp}_{wandb.run.name}")
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    if resuming:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        state_dict = torch.load(ckpt_path, map_location=device, weights_only=True)
+        model.load_state_dict(state_dict)
+        print(f"Resuming from '{ckpt_path}' at iteration {last_iter}; continuing from iteration {start_iter}.")
+        wandb.init(project=wandb_project, config=config, id=wandb_run_id, resume="must")
+    else:
+        wandb.init(project=wandb_project, config=config)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        checkpoint_dir = os.path.join("checkpoints", f"{timestamp}_{wandb.run.name}")
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     optim = Optimizer(
         model, Hamiltonians, point_of_interest=config["point_of_interest"]
@@ -102,6 +143,7 @@ def main():
             fine_tuning=config["fine_tuning"],
             use_SR=config["use_SR"],
             ensemble_id=int(config["use_SR"]),
+            start_iter=start_iter,
             checkpoint_dir=checkpoint_dir,
             checkpoint_freq=config["checkpoint_freq"],
             run_config=config,
