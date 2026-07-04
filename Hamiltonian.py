@@ -312,12 +312,12 @@ class IsingThreeSpin(Hamiltonian):
 
     def update_param(self, param):
         # param: (1, ), h
-        self.H[2][1][0] = param / 2
+        self.H[2][1][0] = -param / 2
 
     def full_H(self, param=1):
         if isinstance(param, torch.Tensor):
             param = param.detach().cpu().numpy().item()
-        h = param / 2
+        h = -param / 2
         self.Hamiltonian = sparse.csr_matrix((2**self.n, 2**self.n), dtype=np.float64)
         for conn in self.connections:
             JZZ = 1
@@ -326,7 +326,7 @@ class IsingThreeSpin(Hamiltonian):
                     JZZ = sparse.kron(JZZ, Z, format="csr")
                 else:
                     JZZ = sparse.kron(JZZ, I, format="csr")
-            self.Hamiltonian = self.Hamiltonian + self.J2 * JZZ
+            self.Hamiltonian = self.Hamiltonian + (-self.J2 / 2) * JZZ
         for prev, center, nxt in self.triples.tolist():
             JZXZ = 1
             for i in range(self.n):
@@ -336,7 +336,7 @@ class IsingThreeSpin(Hamiltonian):
                     JZXZ = sparse.kron(JZXZ, Z, format="csr")
                 else:
                     JZXZ = sparse.kron(JZXZ, I, format="csr")
-            self.Hamiltonian = self.Hamiltonian + self.J3 * JZXZ
+            self.Hamiltonian = self.Hamiltonian + (-self.J3 / 2) * JZXZ
         for i in range(self.n):
             hX = 1
             for j in range(self.n):
