@@ -32,7 +32,18 @@ from scipy.interpolate import PchipInterpolator
 
 DPI = 300
 
-MAGNETIZATION_LABEL = r"$\sqrt{\left\langle\left(\frac{1}{L}\sum_i \sigma^z_i\right)^{2}\right\rangle}$"
+MAGNETIZATION_LABEL = r"$m(h)$"
+
+plt.rcParams.update(
+    {
+        "font.size": 16,
+        "axes.titlesize": 19,
+        "axes.labelsize": 18,
+        "legend.fontsize": 15,
+        "xtick.labelsize": 15,
+        "ytick.labelsize": 15,
+    }
+)
 
 
 def _load(data_path: Path) -> dict:
@@ -76,7 +87,9 @@ def _plot_2d(ax, kind: str, data: dict) -> None:
     n_readings = data["readings"].shape[1]
     for iter_idx, iteration in enumerate(iterations):
         mean = _mean_curve(data, iter_idx)
-        label = f"{kind} reading" if len(iterations) == 1 else f"{kind} reading (iter {int(iteration)})"
+        label = f"{kind}\nreading" if kind == "Exact diagonalization" else f"{kind} reading"
+        if len(iterations) > 1:
+            label += f" (iter {int(iteration)})"
         if kind in _CURVE_STYLES:
             linestyle, color, linewidth, zorder = _CURVE_STYLES[kind]
             h_dense = np.linspace(h_values.min(), h_values.max(), 400)
@@ -111,7 +124,9 @@ def _plot_3d(ax, fig, data_path: Path, data: dict) -> None:
     ax.invert_yaxis()  # later iterations in front, so earlier ones don't obscure them
 
 
-def _plot_relative_error(ax, transformer_data: dict, reference_data: dict, reference_label: str) -> None:
+def _plot_relative_error(
+    ax, transformer_data: dict, reference_data: dict, reference_label: str, highlight_region=None,
+) -> None:
     """
     Plots |transformer - reference| / |reference| vs h for each transformer iteration. The
     reference's mean curve (its single iteration/reading) is linearly interpolated onto the
@@ -124,6 +139,12 @@ def _plot_relative_error(ax, transformer_data: dict, reference_data: dict, refer
     ref_h = reference_data["h_values"].numpy()
     ref_mean = _mean_curve(reference_data, 0)
     ref_on_t_grid = np.interp(t_h, ref_h, ref_mean)
+
+    if highlight_region is not None:
+        ax.axvspan(
+            highlight_region[0], highlight_region[1], color="tab:blue", alpha=0.15,
+            label="Region of interest", zorder=0,
+        )
 
     for iter_idx, iteration in enumerate(t_iterations):
         t_mean = _mean_curve(transformer_data, iter_idx)
@@ -214,14 +235,21 @@ def main() -> None:
         raise SystemExit("--mode 3d only supports a single input file (depth axis is that file's iterations).")
 
     loaded = {path: _load(path) for path in data_paths}
+    last_data = loaded[data_paths[-1]]
 
-    fig = plt.figure(figsize=(14, 6) if show_relative_error else (9, 7) if args.mode == "3d" else (8, 6))
-    if show_relative_error:
-        ax = fig.add_subplot(1, 2, 1)
-        ax_err = fig.add_subplot(1, 2, 2)
+    if args.out is not None:
+        out = args.out
     else:
-        ax = fig.add_subplot(projection="3d") if args.mode == "3d" else fig.add_subplot()
-        ax_err = None
+        run_name = last_data.get("wandb_run_name") or "run"
+        plot_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        figures_dir = Path(__file__).parent / "figures"
+        if args.version is not None:
+            figures_dir = figures_dir / args.version
+        out = figures_dir / f"{run_name}_{plot_timestamp}.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    fig = plt.figure(figsize=(10, 7.5) if args.mode == "3d" else (9, 6.5))
+    ax = fig.add_subplot(projection="3d") if args.mode == "3d" else fig.add_subplot()
 
     for data_path in data_paths:
         data = loaded[data_path]
@@ -236,7 +264,6 @@ def main() -> None:
         else:
             _plot_3d(ax, fig, data_path, data)
 
-    last_data = loaded[data_paths[-1]]
     ax.set_xlabel(last_data["h_name"])
     if args.mode == "2d":
         if args.highlight_region is not None:
@@ -256,29 +283,28 @@ def main() -> None:
         ax.set_zlabel(MAGNETIZATION_LABEL)
         ax.set_title(f"Magnetization vs. {last_data['h_name']} and Iteration — L={last_data['L']}")
 
-    if show_relative_error:
-        _plot_relative_error(ax_err, loaded[args.transformer_readings], loaded[reference_path], reference_label)
-
     if args.xlim is not None:
         ax.set_xlim(args.xlim)
-        if ax_err is not None:
-            ax_err.set_xlim(args.xlim)
 
     fig.tight_layout()
-
-    if args.out is not None:
-        out = args.out
-    else:
-        run_name = last_data.get("wandb_run_name") or "run"
-        plot_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        figures_dir = Path(__file__).parent / "figures"
-        if args.version is not None:
-            figures_dir = figures_dir / args.version
-        out = figures_dir / f"{run_name}_{plot_timestamp}.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=DPI)
+    mag_out = out.with_name(f"{out.stem}_magnetization{out.suffix}") if show_relative_error else out
+    fig.savefig(mag_out, dpi=DPI)
     plt.close(fig)
-    print(f"Wrote {out}")
+    print(f"Wrote {mag_out}")
+
+    if show_relative_error:
+        fig_err, ax_err = plt.subplots(figsize=(9, 6.5))
+        _plot_relative_error(
+            ax_err, loaded[args.transformer_readings], loaded[reference_path], reference_label,
+            highlight_region=args.highlight_region,
+        )
+        if args.xlim is not None:
+            ax_err.set_xlim(args.xlim)
+        fig_err.tight_layout()
+        err_out = out.with_name(f"{out.stem}_relative_error{out.suffix}")
+        fig_err.savefig(err_out, dpi=DPI)
+        plt.close(fig_err)
+        print(f"Wrote {err_out}")
 
 
 if __name__ == "__main__":
