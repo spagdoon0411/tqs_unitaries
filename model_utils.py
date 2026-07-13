@@ -128,6 +128,75 @@ def sample_without_weight(model, batch=1000, symmetry=None):
     return samples
 
 
+class KVCache:
+    """Per-layer append-only key/value cache for KV-cached autoregressive sampling.
+
+    Each entry cache.k[l] / cache.v[l] is (batch, n_head, past_len, head_dim), grown one
+    (or, at prefill, prefix_len) position at a time by model._sdpa_attn_step.
+    """
+
+    def __init__(self, n_layers):
+        self.k = [None] * n_layers
+        self.v = [None] * n_layers
+
+
+@torch.no_grad()
+def sample_without_weight_cached(model, batch=1000, symmetry=None):
+    """
+    KV-cached equivalent of sample_without_weight: same fixed-batch, no-dedup, i.i.d.
+    multinomial sampling, but each autoregressive step reuses cached keys/values instead of
+    re-encoding the whole prefix+spins sequence (see model.TransformerModel.forward_step).
+
+    Requires model.eval() for exact equivalence (dropout must be inactive). The prefix may
+    carry per-column parameters (prefix batch dim n_params); batch must be a multiple of
+    n_params, and columns are laid out grouped by parameter (repeat_interleave order), so a
+    batched h-sweep and caching compose in one pass.
+    """
+    assert model.phys_dim == 2, "Only spin 1/2 systems are supported"
+    n = int(model.system_size.prod())
+    B = batch
+    D = model.input_dim
+    seq_prefix_len = model.seq_prefix_len
+
+    U1_symm = symmetry.U1_symm if symmetry is not None else False
+
+    cache = KVCache(model.n_layers)
+
+    # Prefill: process the whole prefix at once, priming the cache. Its last output is the
+    # conditional for spin 0. Expand the (possibly per-column-param) prefix to the full batch
+    # exactly as wrap_spins does, so column c uses its own parameter's prefix.
+    prefix = model.prefix  # (seq_prefix_len, n_params, input_dim)
+    n_params = prefix.shape[1]
+    assert B % n_params == 0, f"batch {B} must be a multiple of n_params {n_params}"
+    prefix_exp = prefix.repeat_interleave(B // n_params, dim=1)  # (seq_prefix_len, B, D)
+    log_amp = model.forward_step(prefix_exp, cache, start_pos=0)  # (seq_prefix_len, B, phys)
+    amp = log_amp[-1].exp()  # (B, phys_dim), conditional for spin 0
+
+    samples = torch.zeros((0, B))
+    for i in range(n):
+        if U1_symm:
+            n_down = samples.sum(dim=0)  # (B, )
+            n_up = samples.shape[0] - n_down
+            amp[n_up >= n / 2, 0] = 0
+            amp[n_down >= n / 2, 1] = 0
+        sampled_spins = torch.multinomial(amp, 1)  # (B, 1)
+        samples = torch.cat([samples, sampled_spins.T], dim=0)  # (i+1, B)
+        if i == n - 1:
+            break
+        # Feed the just-sampled spin (absolute position seq_prefix_len + i) to get spin i+1.
+        token = torch.zeros(1, B, D)
+        token[0, :, : model.phys_dim] = F.one_hot(
+            sampled_spins.squeeze(1).to(torch.int64), num_classes=model.phys_dim
+        ).to(token.dtype)
+        log_amp = model.forward_step(token, cache, start_pos=seq_prefix_len + i)
+        amp = log_amp[-1].exp()  # (B, phys_dim), conditional for spin i+1
+
+    if symmetry is not None:
+        samples = symmetry.apply_random(samples)
+
+    return samples
+
+
 def compute_psi(model, samples, symmetry=None, check_duplicate=True):
     """
 

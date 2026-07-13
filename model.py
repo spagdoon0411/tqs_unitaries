@@ -264,3 +264,86 @@ class TransformerModel(nn.Module):
                 phase = torch.cat(phase, dim=1)
                 result.append(phase)
         return result
+
+    @torch.no_grad()
+    def forward_step(self, tokens, cache, start_pos, compute_phase=False):
+        """
+        Incremental (KV-cached) analogue of forward, for autoregressive sampling. Instead of
+        re-encoding the whole prefix+spins sequence every step, it pushes only the `tokens`
+        at absolute positions [start_pos, start_pos + T) through the stack, reusing each
+        layer's cached keys/values for all earlier positions.
+
+        This is mathematically identical to forward for a causal (lower-triangular) mask:
+        with start_pos == 0 the whole prefix is processed as one causal chunk (priming the
+        cache); every later call passes the single newly sampled token. The trained weights
+        are used unchanged -- `_sdpa_attn_step` slices the stock fused `in_proj_weight`, so
+        checkpoints load with no remap. Requires model.eval() (dropout must be inactive for
+        exact equivalence) and the deduplication-free, fixed-batch sampling path.
+
+        tokens : (T, batch, input_dim) raw input (same encoding as wrap_spins produces)
+        cache  : KVCache (model_utils.KVCache), mutated in place
+        start_pos : absolute sequence index of tokens[0]
+        returns log_amp (and log_phase if compute_phase) of shape (T, batch, phys_dim)
+        """
+        x = self.encoder(tokens) * math.sqrt(self.embedding_size)  # (T, batch, embedding)
+        # Absolute-position PE: forward adds self.pe[:seq_len], so position p uses pe[p].
+        x = x + self.pos_encoder.pe[start_pos : start_pos + x.size(0)]
+        is_prefill = start_pos == 0
+        for layer_idx, layer in enumerate(self.transformer_encoder.layers):
+            x = _encoder_layer_step(layer, x, cache, layer_idx, self.n_head, is_prefill)
+        log_amp = F.log_softmax(self.amp_head(x), dim=-1)  # (T, batch, phys_dim)
+        if compute_phase:
+            return log_amp, self.softsign(self.phase_head(x))
+        return log_amp
+
+
+def _sdpa_attn_step(mha, x, cache, layer_idx, n_head, is_prefill):
+    """
+    Cache-aware self-attention using stock nn.MultiheadAttention parameters
+    (fused `in_proj_weight`/`in_proj_bias` + `out_proj`), computed with
+    F.scaled_dot_product_attention. Appends this step's keys/values to `cache` and attends
+    over the full cached history.
+
+    x : (T, batch, embed_dim). is_prefill=True processes a causal chunk (the prefix); a
+    single-token step (T=1) is not masked because every cached key is a strictly earlier
+    (hence valid) position. SDPA applies the 1/sqrt(head_dim) scaling itself, matching stock.
+    """
+    T, B, E = x.shape
+    head_dim = E // n_head
+    qkv = F.linear(x, mha.in_proj_weight, mha.in_proj_bias)  # (T, B, 3E), order [q, k, v]
+    q, k, v = qkv.chunk(3, dim=-1)
+
+    def to_heads(t):  # (T, B, E) -> (B, n_head, T, head_dim)
+        return t.contiguous().view(T, B, n_head, head_dim).permute(1, 2, 0, 3)
+
+    q, k, v = to_heads(q), to_heads(k), to_heads(v)
+
+    if cache.k[layer_idx] is None:
+        cache.k[layer_idx], cache.v[layer_idx] = k, v
+    else:
+        cache.k[layer_idx] = torch.cat([cache.k[layer_idx], k], dim=2)
+        cache.v[layer_idx] = torch.cat([cache.v[layer_idx], v], dim=2)
+
+    out = F.scaled_dot_product_attention(
+        q, cache.k[layer_idx], cache.v[layer_idx], is_causal=is_prefill
+    )  # (B, n_head, T, head_dim)
+    out = out.permute(2, 0, 1, 3).contiguous().view(T, B, E)  # (T, B, E)
+    return mha.out_proj(out)
+
+
+def _encoder_layer_step(layer, x, cache, layer_idx, n_head, is_prefill):
+    """
+    One stock TransformerEncoderLayer forward, cache-aware. Honors the layer's own
+    norm_first / activation so it matches whatever the checkpoint was trained with. Dropout
+    submodules are intentionally omitted -- exact only in eval(), where they are identities.
+    """
+    act = getattr(layer, "activation", F.relu)
+    if getattr(layer, "norm_first", False):
+        a = _sdpa_attn_step(layer.self_attn, layer.norm1(x), cache, layer_idx, n_head, is_prefill)
+        x = x + a
+        x = x + layer.linear2(act(layer.linear1(layer.norm2(x))))
+    else:
+        a = _sdpa_attn_step(layer.self_attn, x, cache, layer_idx, n_head, is_prefill)
+        x = layer.norm1(x + a)
+        x = layer.norm2(x + layer.linear2(act(layer.linear1(x))))
+    return x
